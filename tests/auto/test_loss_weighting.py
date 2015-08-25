@@ -6,7 +6,8 @@ np.random.seed(1336)  # for reproducibility
 
 from keras.datasets import mnist
 from keras.models import Sequential, Graph
-from keras.layers.core import Dense, Activation
+from keras.layers.core import Dense, Activation, RepeatVector, TimeDistributedDense
+from keras.layers.recurrent import SimpleRNN
 from keras.utils import np_utils
 import unittest
 
@@ -55,6 +56,18 @@ def create_graph_model():
     model.add_node(Dense(784, 50, activation='relu'), name='d1', input='input')
     model.add_node(Dense(50, 10, activation='softmax'), name='d2', input='d1')
     model.add_output(name='output', input='d2')
+    return model
+
+def create_sequential_seq_model():
+    model = Sequential()
+    model.add(SimpleRNN(2, 2, init='one', return_sequences=True))
+    return model
+
+def create_graph_seq_model():
+    model = Graph()
+    model.add_input(name='input', ndim=3)
+    model.add_node(SimpleRNN(2, 2, init='one', return_sequences=True), name='rnn', input='input')
+    model.add_output(name='output', input='rnn')
     return model
 
 
@@ -115,6 +128,38 @@ class TestLossWeighting(unittest.TestCase):
             score = _test_weights_sequential(model, sample_weight=sample_weight)
             print('score:', score, ' vs.', standard_score)
             self.assertTrue(score < standard_score)
+            
+    def test_sequential_seq(self):
+        print("Testing sample weights on a sequential model with sequential output")
+        model = create_sequential_seq_model()
+        model.compile(loss='mse', optimizer='rmsprop')
+        #X = np.array([np.array([1.])])
+        X = np.array(
+            [[[1, 1], [2, 1], [3, 1], [5, 5]],
+             [[1, 5], [5, 0], [0, 0], [0, 0]]], dtype=np.int32)
+        ys = model.predict(X)
+        mask = [[1.,1.,1.,1.],
+                [1.,1.,0.,0.]]
+        model.fit(X, ys, nb_epoch=1, batch_size=2, verbose=1, sample_weight=mask)
+        #loss = model.fit(X, ys, nb_epoch=1, batch_size=2, verbose=1).history['loss'][0]
+        
+    def test_graph_seq(self):
+        print("Testing sample weights on a graph with sequential output")
+        model = create_graph_seq_model()
+        model.compile(loss={'output': 'mse'}, optimizer='rmsprop')
+        X = np.array(
+            [[[1, 1], [2, 1], [3, 1], [5, 5]],
+             [[1, 5], [5, 0], [0, 0], [0, 0]]], dtype=np.int32)
+        ins = { 'input': X, }
+        ys = model.predict(ins)
+        masks = {
+            'output': [[1.,1.,1.,1.],
+                       [1.,1.,0.,0.]],
+        }
+        data = { 'input': X,
+                 'output': ys['output'] }
+        #model.fit(data, nb_epoch=1, batch_size=2, verbose=1)
+        model.fit(data, nb_epoch=1, batch_size=2, verbose=1, sample_weight=masks)
 
     def test_graph(self):
         for loss in ['mae', 'mse', 'categorical_crossentropy']:
